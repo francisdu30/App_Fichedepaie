@@ -545,183 +545,185 @@ elif page_active == "📅 Planning":
     # ── Dialog de gestion des créneaux ────────────────────────────────────────
     @st.dialog("📅 Gérer le créneau")
     def slot_dialog(d, t_slot):
-        h_next = f"{int(t_slot[:2])+1:02d}:00"
+        slot_h = int(t_slot[:2])
+        h_next = f"{slot_h+1:02d}:00"
 
-        # ── En-tête compact ───────────────────────────────────────────────────
-        today_str = " 📌" if d == TODAY else ""
-        is_we = d.weekday() >= 5
-        hdr_col = "#1a3a80" if d == TODAY else ("#4a50a8" if is_we else "#1a1d2e")
+        # En-tête 1 ligne
+        flag = " 📌" if d == TODAY else (" 🌅" if d.weekday() >= 5 else "")
         st.markdown(
-            f'<div style="font-size:16px;font-weight:700;color:{hdr_col};'
-            f'border-bottom:2px solid #e8eaf0;padding-bottom:8px;margin-bottom:12px">'
-            f'{JOURS_FR[d.weekday()]} {d.strftime("%d %B %Y")}{today_str}'
-            f'<span style="font-size:11px;color:#8890a8;font-weight:400;margin-left:10px">'
-            f'cellule {t_slot} → {h_next}</span></div>',
+            f'<span style="font-size:15px;font-weight:700">'
+            f'{JOURS_FR[d.weekday()]} {d.strftime("%d/%m/%Y")}{flag}</span>'
+            f'<span style="font-size:11px;color:#8890a8;margin-left:8px">'
+            f'🕐 {t_slot} → {h_next}</span>',
             unsafe_allow_html=True)
+        st.markdown("<hr style='margin:8px 0 10px;border-color:#e8eaf0'>",
+                    unsafe_allow_html=True)
 
-        # ── Données fraîches ──────────────────────────────────────────────────
+        # Données fraîches
         cur_pdf = _df(st.session_state.planning_df, PLANNING_COLS)
         cur_rdf = _df(st.session_state.ressources_df, RESSOURCES_COLS)
 
-        # Slots qui couvrent cet horaire ce jour-là
+        # Slots couvrant cet horaire
         slots_here = []
         if not cur_pdf.empty:
             tmp = cur_pdf.copy()
             tmp["_dt"] = pd.to_datetime(tmp["date"]).dt.date
             for _, row in tmp[tmp["_dt"] == d].iterrows():
                 try:
-                    if int(str(row["heure_debut"])[:2]) <= int(t_slot[:2]) < int(str(row["heure_fin"])[:2]):
+                    if int(str(row["heure_debut"])[:2]) <= slot_h < int(str(row["heure_fin"])[:2]):
                         slots_here.append(row.to_dict())
                 except Exception:
                     continue
 
-        # ── Ressources existantes ─────────────────────────────────────────────
+        # ── Slots existants ───────────────────────────────────────────────────
         if slots_here:
-            st.markdown(
-                f'<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
-                f'color:#8890a8;margin-bottom:8px">'
-                f'{len(slots_here)} ressource(s) sur ce créneau</div>',
-                unsafe_allow_html=True)
-
             for slot in slots_here:
-                cfg  = TYPE_HEURE_CFG.get(slot.get("type_heure",""),
-                                          {"bg":"#f0f0f0","dot":"#555","lbl":""})
-                s_id = slot["id_slot"]
+                s_id     = slot["id_slot"]
+                cur_type = slot.get("type_heure", "Travail")
+                hd_h     = int(str(slot["heure_debut"])[:2])
+                hf_h     = int(str(slot["heure_fin"])[:2])
+                cfg      = TYPE_HEURE_CFG.get(cur_type, {"bg":"#f0f0f0","dot":"#555"})
 
-                # Ligne de résumé + boutons d'action
-                st.markdown(
-                    f'<div style="background:#f8f9fc;border-radius:8px;padding:10px 12px;'
-                    f'margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<div>'
-                    f'<span style="font-weight:600;font-size:13px">{slot["nom_ressource"]}</span>'
-                    f'<span style="font-size:11px;color:#8890a8;margin-left:8px">'
-                    f'🕐 {slot["heure_debut"]}→{slot["heure_fin"]}</span>'
-                    f'</div>'
-                    f'<span style="background:{cfg["bg"]};color:{cfg["dot"]};padding:2px 8px;'
-                    f'border-radius:8px;font-size:11px;font-weight:500">{slot.get("type_heure","")}</span>'
-                    f'</div></div>',
+                # Ligne résumé: nom + horaire + badge + delete
+                rc1, rc2 = st.columns([3.5, 0.5])
+                rc1.markdown(
+                    f'<div style="padding:3px 0">'
+                    f'<b style="font-size:13px">{slot["nom_ressource"]}</b>'
+                    f'<span style="font-size:11px;color:#8890a8;margin:0 6px">'
+                    f'{slot["heure_debut"]}→{slot["heure_fin"]}</span>'
+                    f'<span style="background:{cfg["bg"]};color:{cfg["dot"]};'
+                    f'padding:1px 6px;border-radius:8px;font-size:10px;font-weight:500">'
+                    f'{cur_type}</span></div>',
                     unsafe_allow_html=True)
+                with rc2:
+                    if st.button("🗑️", key=f"del_{s_id}_{slot_h}"):
+                        st.session_state.planning_df = st.session_state.planning_df[
+                            st.session_state.planning_df["id_slot"] != s_id]
+                        try:
+                            save_parquet(st.session_state.planning_df, "fiches_paie/planning.parquet")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
 
-                # Formulaire d'édition (protège contre les changements accidentels)
-                with st.form(f"edit_slot_{s_id}"):
-                    hd_in_list   = slot["heure_debut"] in HEURES[:-1]
-                    hf_in_list   = slot["heure_fin"]   in HEURES[1:]
-                    hd_idx = HEURES[:-1].index(slot["heure_debut"]) if hd_in_list else 1
-                    hf_idx = HEURES[1:].index(slot["heure_fin"])    if hf_in_list else 9
-                    tp_idx = TYPES_HEURE.index(slot.get("type_heure","Travail")) \
-                             if slot.get("type_heure") in TYPES_HEURE else 0
+                # Changement de type : immédiat + auto-split si nécessaire
+                tp_idx   = TYPES_HEURE.index(cur_type) if cur_type in TYPES_HEURE else 0
+                new_type = st.selectbox(
+                    "Type d'heure", TYPES_HEURE, index=tp_idx,
+                    key=f"tp_{s_id}_{slot_h}",
+                    label_visibility="collapsed")
 
-                    ec1, ec2, ec3 = st.columns(3)
-                    with ec1:
-                        new_type = st.selectbox("Type d'heure", TYPES_HEURE, index=tp_idx,
-                                                key=f"etp_{s_id}")
-                    with ec2:
+                if new_type != cur_type:
+                    pidx = st.session_state.planning_df[
+                        st.session_state.planning_df["id_slot"] == s_id].index
+                    # Auto-split si on est en milieu de créneau (pas à la frontière)
+                    if slot_h > hd_h and hf_h > slot_h + 1:
+                        # Tronquer le slot existant jusqu'à t_slot
+                        st.session_state.planning_df.loc[pidx, "heure_fin"] = t_slot
+                        # Créer un nouveau slot de t_slot à hf avec le nouveau type
+                        new_s = {
+                            "id_slot":       next_id_safe(st.session_state.planning_df, "id_slot"),
+                            "date":          pd.Timestamp(d),
+                            "heure_debut":   t_slot,
+                            "heure_fin":     slot["heure_fin"],
+                            "id_ressource":  slot["id_ressource"],
+                            "nom_ressource": slot["nom_ressource"],
+                            "type_heure":    new_type,
+                            "notes":         slot.get("notes", ""),
+                            "date_creation": pd.Timestamp(datetime.now()),
+                        }
+                        st.session_state.planning_df = pd.concat(
+                            [st.session_state.planning_df, pd.DataFrame([new_s])],
+                            ignore_index=True)
+                    else:
+                        # Frontière ou créneau d'1h : changer tout le slot
+                        st.session_state.planning_df.loc[pidx, "type_heure"] = new_type
+                    try:
+                        save_parquet(st.session_state.planning_df, "fiches_paie/planning.parquet")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+                # Modifier les horaires du slot (form compact 1 ligne)
+                with st.form(f"hrs_{s_id}"):
+                    hd_idx = HEURES[:-1].index(slot["heure_debut"]) \
+                             if slot["heure_debut"] in HEURES[:-1] else 1
+                    hf_idx = HEURES[1:].index(slot["heure_fin"]) \
+                             if slot["heure_fin"] in HEURES[1:] else 9
+                    fh1, fh2, fh3 = st.columns([2, 2, 1])
+                    with fh1:
                         new_hd = st.selectbox("Début", HEURES[:-1], index=hd_idx,
-                                              key=f"ehd_{s_id}")
-                    with ec3:
-                        new_hf = st.selectbox("Fin", HEURES[1:], index=hf_idx,
-                                              key=f"ehf_{s_id}")
-
-                    st.caption(
-                        f"⚠️ Les modifications s'appliquent à l'intégralité du créneau "
-                        f"{slot['heure_debut']}→{slot['heure_fin']}. "
-                        f"Pour ne modifier qu'une partie, supprimez et recréez avec les horaires souhaités.")
-
-                    eb1, eb2 = st.columns(2)
-                    with eb1:
-                        if st.form_submit_button("💾 Enregistrer", type="primary",
-                                                 use_container_width=True):
-                            if HEURES.index(new_hf) <= HEURES.index(new_hd):
-                                st.error("Fin doit être après Début.")
-                            else:
-                                pidx = st.session_state.planning_df[
-                                    st.session_state.planning_df["id_slot"] == s_id].index
-                                st.session_state.planning_df.loc[pidx, "type_heure"]  = new_type
-                                st.session_state.planning_df.loc[pidx, "heure_debut"] = new_hd
-                                st.session_state.planning_df.loc[pidx, "heure_fin"]   = new_hf
-                                try:
-                                    save_parquet(st.session_state.planning_df,
-                                                 "fiches_paie/planning.parquet")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erreur R2 : {e}")
-                    with eb2:
-                        if st.form_submit_button("🗑️ Supprimer", use_container_width=True):
-                            st.session_state.planning_df = st.session_state.planning_df[
-                                st.session_state.planning_df["id_slot"] != s_id]
+                                              key=f"hd_{s_id}", label_visibility="collapsed")
+                    with fh2:
+                        new_hf = st.selectbox("Fin",   HEURES[1:],  index=hf_idx,
+                                              key=f"hf_{s_id}", label_visibility="collapsed")
+                    with fh3:
+                        save_h = st.form_submit_button("⏱ Horaires", use_container_width=True)
+                    if save_h:
+                        if HEURES.index(new_hf) <= HEURES.index(new_hd):
+                            st.error("Fin > Début.")
+                        else:
+                            pidx2 = st.session_state.planning_df[
+                                st.session_state.planning_df["id_slot"] == s_id].index
+                            st.session_state.planning_df.loc[pidx2, "heure_debut"] = new_hd
+                            st.session_state.planning_df.loc[pidx2, "heure_fin"]   = new_hf
                             try:
                                 save_parquet(st.session_state.planning_df,
                                              "fiches_paie/planning.parquet")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Erreur : {e}")
+                                st.error(str(e))
 
+                st.markdown("<hr style='margin:6px 0;border-color:#f0f1f5'>",
+                            unsafe_allow_html=True)
         else:
-            st.info("Ce créneau est libre.", icon="📭")
+            st.caption("Ce créneau est libre.")
 
         # ── Ajouter une ressource ─────────────────────────────────────────────
         st.markdown(
-            f'<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
-            f'color:#8890a8;margin:12px 0 8px">➕ Ajouter une ressource</div>',
+            '<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
+            'color:#8890a8;letter-spacing:.06em;margin:4px 0 8px">➕ Ajouter</div>',
             unsafe_allow_html=True)
 
         if cur_rdf.empty:
             st.warning("Aucune ressource disponible.")
         else:
-            res_list = cur_rdf[cur_rdf["statut_contrat"] == "Actif"]["nom_ressource"].tolist() \
-                       or cur_rdf["nom_ressource"].tolist()
-
+            res_list = (cur_rdf[cur_rdf["statut_contrat"] == "Actif"]["nom_ressource"].tolist()
+                        or cur_rdf["nom_ressource"].tolist())
             with st.form("dlg_add"):
-                ac1, ac2 = st.columns(2)
-                with ac1:
-                    dlg_res  = st.selectbox("Ressource *", res_list)
-                    dlg_type = st.selectbox("Type d'heure *", TYPES_HEURE)
-                with ac2:
+                a1, a2 = st.columns(2)
+                with a1:
+                    add_res  = st.selectbox("Ressource *", res_list)
+                    add_type = st.selectbox("Type *", TYPES_HEURE)
+                with a2:
                     hd_def = HEURES.index("08:00") if "08:00" in HEURES else 1
                     hf_def = HEURES[1:].index("17:00") if "17:00" in HEURES[1:] else 9
-                    dlg_hd = st.selectbox("Heure début", HEURES[:-1], index=hd_def)
-                    dlg_hf = st.selectbox("Heure fin",   HEURES[1:],  index=hf_def)
-
-                # Ajout multiple en une ligne
-                multi_mode = st.checkbox("Ajouter plusieurs ressources à la fois")
-                multi_sel  = st.multiselect(
-                    "Ressources supplémentaires", res_list,
-                    help="En plus de la ressource principale") if multi_mode else []
-
-                dlg_notes = st.text_input("Notes (optionnel)")
-
+                    add_hd = st.selectbox("Début", HEURES[:-1], index=hd_def)
+                    add_hf = st.selectbox("Fin",   HEURES[1:],  index=hf_def)
                 if st.form_submit_button("✅ Ajouter", type="primary",
                                          use_container_width=True):
-                    if HEURES.index(dlg_hf) <= HEURES.index(dlg_hd):
-                        st.error("L'heure de fin doit être postérieure à l'heure de début.")
+                    if HEURES.index(add_hf) <= HEURES.index(add_hd):
+                        st.error("Fin > Début.")
                     else:
-                        targets = [dlg_res] + [r for r in multi_sel if r != dlg_res]
-                        new_rows = []
-                        sid = next_id_safe(cur_pdf, "id_slot")
-                        for rname in targets:
-                            rrow = cur_rdf[cur_rdf["nom_ressource"] == rname].iloc[0]
-                            new_rows.append({
-                                "id_slot":       sid,
-                                "date":          pd.Timestamp(d),
-                                "heure_debut":   dlg_hd,
-                                "heure_fin":     dlg_hf,
-                                "id_ressource":  rrow["id_ressource"],
-                                "nom_ressource": rname,
-                                "type_heure":    dlg_type,
-                                "notes":         dlg_notes,
-                                "date_creation": pd.Timestamp(datetime.now()),
-                            })
-                            sid += 1
+                        rrow = cur_rdf[cur_rdf["nom_ressource"] == add_res].iloc[0]
+                        new_slot = {
+                            "id_slot":       next_id_safe(cur_pdf, "id_slot"),
+                            "date":          pd.Timestamp(d),
+                            "heure_debut":   add_hd,
+                            "heure_fin":     add_hf,
+                            "id_ressource":  rrow["id_ressource"],
+                            "nom_ressource": add_res,
+                            "type_heure":    add_type,
+                            "notes":         "",
+                            "date_creation": pd.Timestamp(datetime.now()),
+                        }
                         st.session_state.planning_df = pd.concat(
-                            [cur_pdf, pd.DataFrame(new_rows)], ignore_index=True)
+                            [cur_pdf, pd.DataFrame([new_slot])], ignore_index=True)
                         try:
                             save_parquet(st.session_state.planning_df,
                                          "fiches_paie/planning.parquet")
-                            st.success(f"✅ {len(new_rows)} ressource(s) ajoutée(s).")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Erreur R2 : {e}")
+                            st.error(str(e))
 
     # ── Navigation mois / semaine ─────────────────────────────────────────────
     if "plan_anchor" not in st.session_state:
@@ -1133,12 +1135,11 @@ elif page_active == "💰 Fiches de Paie":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page_active == "⚙️ Paramètres":
     st.markdown("# ⚙️ Paramètres")
-    st.caption("Configurez les valeurs par défaut par type de contrat. Les types personnalisés apparaissent dans tous les menus déroulants.")
+    st.caption("Modifiez les paramètres par défaut de chaque type de contrat. "
+               "Ces valeurs pré-remplissent automatiquement les formulaires de création.")
 
-    # Types prédéfinis vs personnalisés
     defined_types = set(TYPES_CONTRAT)
-    all_params = pms if not pms.empty else pd.DataFrame(PARAMS_DEFAULT)
-    custom_types = [t for t in all_params["type_contrat"].tolist() if t not in defined_types]
+    all_params    = pms if not pms.empty else pd.DataFrame(PARAMS_DEFAULT)
 
     def _save_params(df):
         try:
@@ -1147,76 +1148,83 @@ elif page_active == "⚙️ Paramètres":
         except Exception as e:
             return False, str(e)
 
-    def _param_form(key_prefix, cur, submit_label, col_key=None):
-        """Render a param edit form and return (submitted, values_dict)."""
-        p1, p2 = st.columns(2)
-        with p1:
-            ph  = st.number_input("Heures hebdomadaires", 0.0, 60.0,
+    def _compact_param_fields(key_prefix, cur):
+        """Champs de paramètres en grille 3×2. Retourne le dict des valeurs."""
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ph  = st.number_input("Heures/sem", 0.0, 60.0,
                                   float(cur.get("heures_hebdo", 35)), 0.5,
                                   key=f"{key_prefix}_hh")
-            pt  = st.number_input("Taux horaire de base (€/h)", 0.0,
-                                  value=float(cur.get("taux_horaire_base", 15.0)), step=0.1,
-                                  key=f"{key_prefix}_th")
-            pjc = st.number_input("Jours de congés annuels", 0, 50,
+            pjc = st.number_input("Congés/an (j)", 0, 60,
                                   int(cur.get("jours_conge_annuels", 25)),
                                   key=f"{key_prefix}_jc")
-        with p2:
-            pcs = st.number_input("Cotisations salariales %", 0.0, 60.0,
-                                  float(cur.get("cotisations_salariales_pct", 22.0)), 0.1,
-                                  key=f"{key_prefix}_cs")
-            pcp = st.number_input("Cotisations patronales %", 0.0, 80.0,
-                                  float(cur.get("cotisations_patronales_pct", 42.0)), 0.1,
-                                  key=f"{key_prefix}_cp")
-            pe  = st.number_input("Période d'essai (jours)", 0,
+        with c2:
+            pt  = st.number_input("Taux horaire (€/h)", 0.0,
+                                  value=float(cur.get("taux_horaire_base", 15.0)), step=0.1,
+                                  key=f"{key_prefix}_th")
+            pe  = st.number_input("Période d'essai (j)", 0,
                                   value=int(cur.get("periode_essai_jours", 0)),
                                   key=f"{key_prefix}_pe")
-        pn = st.text_input("Notes / particularités",
-                           value=str(cur.get("notes","")) if cur.get("notes") else "",
+        with c3:
+            pcs = st.number_input("Cotis. salariales %", 0.0, 60.0,
+                                  float(cur.get("cotisations_salariales_pct", 22.0)), 0.1,
+                                  key=f"{key_prefix}_cs")
+            pcp = st.number_input("Cotis. patronales %", 0.0, 80.0,
+                                  float(cur.get("cotisations_patronales_pct", 42.0)), 0.1,
+                                  key=f"{key_prefix}_cp")
+        pn = st.text_input("Notes", value=str(cur.get("notes","")) if cur.get("notes") else "",
                            key=f"{key_prefix}_n")
-        submitted = st.form_submit_button(submit_label, type="primary", use_container_width=True)
-        vals = {"heures_hebdo": ph, "taux_horaire_base": pt, "jours_conge_annuels": pjc,
+        return {"heures_hebdo": ph, "taux_horaire_base": pt, "jours_conge_annuels": pjc,
                 "periode_essai_jours": pe, "cotisations_salariales_pct": pcs,
                 "cotisations_patronales_pct": pcp, "notes": pn}
-        return submitted, vals
 
-    tab_existing, tab_new = st.tabs(["✏️ Types existants", "➕ Créer un nouveau type"])
+    # ── Cartes pour chaque type ───────────────────────────────────────────────
+    all_tc_list = all_params["type_contrat"].tolist()
 
-    # ── Tab 1 : Types existants ───────────────────────────────────────────────
-    with tab_existing:
-        if all_params.empty:
-            st.info("Aucun type configuré.")
-        else:
-            # Sélecteur du type à éditer
-            all_tc_list = all_params["type_contrat"].tolist()
-            tc_edit = st.selectbox(
-                "Type de contrat à modifier",
-                all_tc_list,
-                format_func=lambda t: f"{'🏷️' if t not in defined_types else '📋'} {t}"
-                            + (" · Personnalisé" if t not in defined_types else " · Prédéfini"),
-                key="param_tc_edit")
+    for tc in all_tc_list:
+        is_custom   = tc not in defined_types
+        badge_col   = "#6b1aa8" if is_custom else "#1a6fa8"
+        badge_bg    = "#ede8fd" if is_custom else "#ddeeff"
+        badge_txt   = "Personnalisé" if is_custom else "Prédéfini"
+        cur         = all_params[all_params["type_contrat"] == tc].iloc[0].to_dict()
 
-            is_custom = tc_edit not in defined_types
+        # Résumé court pour le label de l'expander
+        hh   = cur.get("heures_hebdo", 0)
+        taux = cur.get("taux_horaire_base", 0)
+        cs   = cur.get("cotisations_salariales_pct", 0)
+        summary = f"{hh:.0f}h/sem · {taux:.2f}€/h · Sal. {cs:.0f}%"
 
-            # Badge prédéfini / personnalisé
-            badge_txt = "Personnalisé" if is_custom else "Prédéfini"
-            badge_col = "#6b1aa8" if is_custom else "#1a6fa8"
-            badge_bg  = "#ede8fd" if is_custom else "#ddeeff"
+        with st.expander(
+            f"{'🏷️' if is_custom else '📋'}  **{tc}** — {summary}",
+            expanded=False):
+
             st.markdown(
-                f'<span style="background:{badge_bg};color:{badge_col};padding:3px 10px;'
-                f'border-radius:10px;font-size:12px;font-weight:600">{badge_txt}</span>',
+                f'<span style="background:{badge_bg};color:{badge_col};padding:2px 8px;'
+                f'border-radius:8px;font-size:11px;font-weight:600">{badge_txt}</span>',
                 unsafe_allow_html=True)
-            st.markdown("")  # spacer
 
-            cur = all_params[all_params["type_contrat"] == tc_edit].iloc[0].to_dict()
+            with st.form(f"param_edit_{tc}"):
+                vals = _compact_param_fields(f"e_{tc}", cur)
+                btn_cols = st.columns([2, 1, 1])
+                with btn_cols[0]:
+                    save_ok = st.form_submit_button(
+                        "💾 Enregistrer", type="primary", use_container_width=True)
+                with btn_cols[1]:
+                    # Réinitialiser aux valeurs d'usine (prédéfinis seulement)
+                    factory = next((p for p in PARAMS_DEFAULT if p["type_contrat"] == tc), None)
+                    reset_ok = st.form_submit_button(
+                        "🔄 Défaut", use_container_width=True,
+                        disabled=(factory is None))
+                with btn_cols[2]:
+                    del_ok = st.form_submit_button(
+                        "🗑️ Supprimer", use_container_width=True,
+                        disabled=(not is_custom),
+                        help="Seuls les types personnalisés peuvent être supprimés.")
 
-            with st.form(f"param_edit_{tc_edit}"):
-                st.markdown(f'<div class="section-title">Modifier — {tc_edit}</div>',
-                            unsafe_allow_html=True)
-                submitted, vals = _param_form(f"edit_{tc_edit}", cur, "💾 Enregistrer les modifications")
-                if submitted:
-                    new_p = {"type_contrat": tc_edit, **vals}
+                if save_ok:
+                    new_p = {"type_contrat": tc, **vals}
                     idx = st.session_state.params_df[
-                        st.session_state.params_df["type_contrat"] == tc_edit].index
+                        st.session_state.params_df["type_contrat"] == tc].index
                     if len(idx) > 0:
                         for k, v in new_p.items():
                             st.session_state.params_df.loc[idx, k] = v
@@ -1225,93 +1233,54 @@ elif page_active == "⚙️ Paramètres":
                             [st.session_state.params_df, pd.DataFrame([new_p])], ignore_index=True)
                     ok, err = _save_params(st.session_state.params_df)
                     if ok:
-                        st.success(f"✅ Type «{tc_edit}» mis à jour.")
-                        st.rerun()
+                        st.success(f"✅ «{tc}» enregistré."); st.rerun()
                     else:
-                        st.error(f"Erreur R2 : {err}")
+                        st.error(f"Erreur : {err}")
 
-            # Actions sous le form
-            act1, act2, act3 = st.columns([1, 1, 2])
-            with act1:
-                # Réinitialiser aux valeurs par défaut (types prédéfinis seulement)
-                default_vals = next((p for p in PARAMS_DEFAULT if p["type_contrat"] == tc_edit), None)
-                if default_vals and st.button("🔄 Réinitialiser défaut", use_container_width=True):
+                if reset_ok and factory:
                     idx = st.session_state.params_df[
-                        st.session_state.params_df["type_contrat"] == tc_edit].index
-                    for k, v in default_vals.items():
+                        st.session_state.params_df["type_contrat"] == tc].index
+                    for k, v in factory.items():
                         st.session_state.params_df.loc[idx, k] = v
                     ok, err = _save_params(st.session_state.params_df)
                     if ok:
-                        st.success(f"✅ «{tc_edit}» réinitialisé."); st.rerun()
+                        st.success(f"✅ «{tc}» réinitialisé."); st.rerun()
                     else:
                         st.error(f"Erreur : {err}")
-                elif not default_vals:
-                    st.markdown("")  # pas de reset pour les types personnalisés
-            with act2:
-                if is_custom:
-                    if st.button("🗑️ Supprimer ce type", type="secondary", use_container_width=True):
-                        st.session_state.params_df = st.session_state.params_df[
-                            st.session_state.params_df["type_contrat"] != tc_edit]
-                        ok, err = _save_params(st.session_state.params_df)
-                        if ok:
-                            st.success(f"✅ Type «{tc_edit}» supprimé."); st.rerun()
-                        else:
-                            st.error(f"Erreur : {err}")
-                else:
-                    st.caption("Les types prédéfinis ne peuvent pas être supprimés.")
 
-    # ── Tab 2 : Nouveau type personnalisé ─────────────────────────────────────
-    with tab_new:
-        st.markdown('<div class="section-title">Créer un type de contrat personnalisé</div>',
-                    unsafe_allow_html=True)
+                if del_ok and is_custom:
+                    st.session_state.params_df = st.session_state.params_df[
+                        st.session_state.params_df["type_contrat"] != tc]
+                    ok, err = _save_params(st.session_state.params_df)
+                    if ok:
+                        st.success(f"✅ «{tc}» supprimé."); st.rerun()
+                    else:
+                        st.error(f"Erreur : {err}")
+
+    # ── Ajouter un nouveau type ───────────────────────────────────────────────
+    st.markdown("---")
+    with st.expander("➕ Créer un nouveau type de contrat", expanded=False):
         st.caption("Le nouveau type apparaîtra dans les menus déroulants de l'onglet Ressources.")
-
         with st.form("param_new_type"):
-            n_name = st.text_input("Nom du type *",
-                                   placeholder="Ex: Portage salarial, CDI Sénior, …")
-            new_submitted, new_vals = _param_form(
+            n_name = st.text_input("Nom du nouveau type *",
+                                   placeholder="Ex: Portage salarial, CDI Cadre, …")
+            new_vals = _compact_param_fields(
                 "new_type",
                 {"heures_hebdo": 35, "taux_horaire_base": 15.0, "jours_conge_annuels": 25,
                  "periode_essai_jours": 0, "cotisations_salariales_pct": 22.0,
-                 "cotisations_patronales_pct": 42.0, "notes": ""},
-                "✅ Créer le type personnalisé")
-            if new_submitted:
-                if not n_name.strip():
-                    st.error("Le nom du type est obligatoire.")
-                elif n_name.strip() in all_params["type_contrat"].values:
-                    st.error(f"Le type «{n_name.strip()}» existe déjà.")
+                 "cotisations_patronales_pct": 42.0, "notes": ""})
+            if st.form_submit_button("✅ Créer", type="primary", use_container_width=True):
+                n = n_name.strip()
+                if not n:
+                    st.error("Le nom est obligatoire.")
+                elif n in all_params["type_contrat"].values:
+                    st.error(f"«{n}» existe déjà.")
                 else:
-                    new_p = {"type_contrat": n_name.strip(), **new_vals}
+                    new_p = {"type_contrat": n, **new_vals}
                     st.session_state.params_df = pd.concat(
                         [st.session_state.params_df, pd.DataFrame([new_p])], ignore_index=True)
                     ok, err = _save_params(st.session_state.params_df)
                     if ok:
-                        st.success(f"✅ Type «{n_name.strip()}» créé !"); st.rerun()
+                        st.success(f"✅ Type «{n}» créé !"); st.rerun()
                     else:
-                        st.error(f"Erreur R2 : {err}")
-
-    # ── Tableau récapitulatif ─────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown('<div class="section-title">Récapitulatif de tous les types</div>',
-                unsafe_allow_html=True)
-    display_df = all_params.copy()
-    # Colonne "type" : prédéfini ou personnalisé
-    display_df["_type"] = display_df["type_contrat"].apply(
-        lambda t: "Prédéfini" if t in defined_types else "Personnalisé")
-    st.dataframe(
-        display_df[["type_contrat","_type","heures_hebdo","taux_horaire_base",
-                    "jours_conge_annuels","cotisations_salariales_pct",
-                    "cotisations_patronales_pct","notes"]],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "type_contrat":               st.column_config.TextColumn("Contrat"),
-            "_type":                      st.column_config.TextColumn("Catégorie"),
-            "heures_hebdo":               st.column_config.NumberColumn("H/sem",    format="%.1f h"),
-            "taux_horaire_base":          st.column_config.NumberColumn("Taux €/h", format="%.2f €"),
-            "jours_conge_annuels":        st.column_config.NumberColumn("Congés",   format="%d j"),
-            "cotisations_salariales_pct": st.column_config.NumberColumn("Sal. %",   format="%.1f %%"),
-            "cotisations_patronales_pct": st.column_config.NumberColumn("Pat. %",   format="%.1f %%"),
-            "notes":                      st.column_config.TextColumn("Notes"),
-        }
-    )
+                        st.error(f"Erreur : {err}")
