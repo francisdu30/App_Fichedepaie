@@ -543,194 +543,185 @@ elif page_active == "📅 Planning":
     </style>""", unsafe_allow_html=True)
 
     # ── Dialog de gestion des créneaux ────────────────────────────────────────
-    @st.dialog("📅 Gérer le créneau", width="large")
+    @st.dialog("📅 Gérer le créneau")
     def slot_dialog(d, t_slot):
         h_next = f"{int(t_slot[:2])+1:02d}:00"
-        is_we  = d.weekday() >= 5
-        hdr_bg = "#eef4ff" if d == TODAY else ("#f4f4fb" if is_we else "#f8f9fc")
-        hdr_col= "#1a3a80" if d == TODAY else "#1a1d2e"
-        today_tag = "  📌 Aujourd'hui" if d == TODAY else ""
+
+        # ── En-tête compact ───────────────────────────────────────────────────
+        today_str = " 📌" if d == TODAY else ""
+        is_we = d.weekday() >= 5
+        hdr_col = "#1a3a80" if d == TODAY else ("#4a50a8" if is_we else "#1a1d2e")
         st.markdown(
-            f'<div style="background:{hdr_bg};border-radius:10px;padding:14px 18px;'
-            f'margin-bottom:18px;border:1px solid #e0e4f0">'
-            f'<div style="font-size:19px;font-weight:700;color:{hdr_col}">'
-            f'{JOURS_FR[d.weekday()]} {d.strftime("%d %B %Y")}{today_tag}</div>'
-            f'<div style="font-size:13px;color:#8890a8;margin-top:3px">'
-            f'Plage horaire · <b style="color:{hdr_col}">{t_slot}</b>'
-            f' → <b style="color:{hdr_col}">{h_next}</b></div></div>',
+            f'<div style="font-size:16px;font-weight:700;color:{hdr_col};'
+            f'border-bottom:2px solid #e8eaf0;padding-bottom:8px;margin-bottom:12px">'
+            f'{JOURS_FR[d.weekday()]} {d.strftime("%d %B %Y")}{today_str}'
+            f'<span style="font-size:11px;color:#8890a8;font-weight:400;margin-left:10px">'
+            f'cellule {t_slot} → {h_next}</span></div>',
             unsafe_allow_html=True)
 
-        # Lire le planning frais depuis session_state
+        # ── Données fraîches ──────────────────────────────────────────────────
         cur_pdf = _df(st.session_state.planning_df, PLANNING_COLS)
         cur_rdf = _df(st.session_state.ressources_df, RESSOURCES_COLS)
 
-        # Tous les slots qui couvrent cet horaire ce jour-là
+        # Slots qui couvrent cet horaire ce jour-là
         slots_here = []
         if not cur_pdf.empty:
             tmp = cur_pdf.copy()
             tmp["_dt"] = pd.to_datetime(tmp["date"]).dt.date
             for _, row in tmp[tmp["_dt"] == d].iterrows():
                 try:
-                    hd_h = int(str(row["heure_debut"])[:2])
-                    hf_h = int(str(row["heure_fin"])[:2])
-                    if hd_h <= int(t_slot[:2]) < hf_h:
+                    if int(str(row["heure_debut"])[:2]) <= int(t_slot[:2]) < int(str(row["heure_fin"])[:2]):
                         slots_here.append(row.to_dict())
                 except Exception:
                     continue
 
-        # ── Ressources présentes ──────────────────────────────────────────────
-        st.markdown(f'<div class="section-title">'
-                    f'{"Ressources planifiées" if slots_here else "Aucune ressource planifiée"}'
-                    f'{f" ({len(slots_here)})" if slots_here else ""}</div>',
+        # ── Ressources existantes ─────────────────────────────────────────────
+        if slots_here:
+            st.markdown(
+                f'<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
+                f'color:#8890a8;margin-bottom:8px">'
+                f'{len(slots_here)} ressource(s) sur ce créneau</div>',
+                unsafe_allow_html=True)
+
+            for slot in slots_here:
+                cfg  = TYPE_HEURE_CFG.get(slot.get("type_heure",""),
+                                          {"bg":"#f0f0f0","dot":"#555","lbl":""})
+                s_id = slot["id_slot"]
+
+                # Ligne de résumé + boutons d'action
+                st.markdown(
+                    f'<div style="background:#f8f9fc;border-radius:8px;padding:10px 12px;'
+                    f'margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<div>'
+                    f'<span style="font-weight:600;font-size:13px">{slot["nom_ressource"]}</span>'
+                    f'<span style="font-size:11px;color:#8890a8;margin-left:8px">'
+                    f'🕐 {slot["heure_debut"]}→{slot["heure_fin"]}</span>'
+                    f'</div>'
+                    f'<span style="background:{cfg["bg"]};color:{cfg["dot"]};padding:2px 8px;'
+                    f'border-radius:8px;font-size:11px;font-weight:500">{slot.get("type_heure","")}</span>'
+                    f'</div></div>',
                     unsafe_allow_html=True)
 
-        if slots_here:
-            # En-têtes colonnes
-            hc = st.columns([2.0, 1.3, 1.8, 0.5])
-            for col, lbl in zip(hc, ["Ressource","Horaire","Type d'heure","🗑️"]):
-                col.markdown(f'<div style="font-size:10px;font-weight:600;color:#8890a8;'
-                             f'text-transform:uppercase;border-bottom:1px solid #e8eaf0;'
-                             f'padding-bottom:3px;margin-bottom:4px">{lbl}</div>',
-                             unsafe_allow_html=True)
-            for slot in slots_here:
-                cfg = TYPE_HEURE_CFG.get(slot.get("type_heure",""),
-                                         {"bg":"#f0f0f0","dot":"#555","lbl":str(slot.get("type_heure",""))})
-                sc1, sc2, sc3, sc4 = st.columns([2.0, 1.3, 1.8, 0.5])
-                sc1.markdown(
-                    f'<div style="padding:4px 0">'
-                    f'<span style="font-weight:600;font-size:13px">{slot["nom_ressource"]}</span></div>',
-                    unsafe_allow_html=True)
-                sc2.markdown(
-                    f'<div style="padding:4px 0;font-size:12px;color:#8890a8">'
-                    f'🕐 {slot["heure_debut"]}→{slot["heure_fin"]}</div>',
-                    unsafe_allow_html=True)
-                with sc3:
-                    cur_type = slot.get("type_heure","Travail")
-                    new_type = st.selectbox(
-                        "type", TYPES_HEURE,
-                        index=TYPES_HEURE.index(cur_type) if cur_type in TYPES_HEURE else 0,
-                        key=f"dlg_tp_{slot['id_slot']}",
-                        label_visibility="collapsed")
-                    if new_type != cur_type:
-                        idx = st.session_state.planning_df[
-                            st.session_state.planning_df["id_slot"] == slot["id_slot"]].index
-                        st.session_state.planning_df.loc[idx, "type_heure"] = new_type
-                        try:
-                            save_parquet(st.session_state.planning_df, "fiches_paie/planning.parquet")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur R2 : {e}")
-                with sc4:
-                    if st.button("🗑️", key=f"dlg_del_{slot['id_slot']}"):
-                        st.session_state.planning_df = st.session_state.planning_df[
-                            st.session_state.planning_df["id_slot"] != slot["id_slot"]]
-                        try:
-                            save_parquet(st.session_state.planning_df, "fiches_paie/planning.parquet")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur : {e}")
-            st.divider()
+                # Formulaire d'édition (protège contre les changements accidentels)
+                with st.form(f"edit_slot_{s_id}"):
+                    hd_in_list   = slot["heure_debut"] in HEURES[:-1]
+                    hf_in_list   = slot["heure_fin"]   in HEURES[1:]
+                    hd_idx = HEURES[:-1].index(slot["heure_debut"]) if hd_in_list else 1
+                    hf_idx = HEURES[1:].index(slot["heure_fin"])    if hf_in_list else 9
+                    tp_idx = TYPES_HEURE.index(slot.get("type_heure","Travail")) \
+                             if slot.get("type_heure") in TYPES_HEURE else 0
+
+                    ec1, ec2, ec3 = st.columns(3)
+                    with ec1:
+                        new_type = st.selectbox("Type d'heure", TYPES_HEURE, index=tp_idx,
+                                                key=f"etp_{s_id}")
+                    with ec2:
+                        new_hd = st.selectbox("Début", HEURES[:-1], index=hd_idx,
+                                              key=f"ehd_{s_id}")
+                    with ec3:
+                        new_hf = st.selectbox("Fin", HEURES[1:], index=hf_idx,
+                                              key=f"ehf_{s_id}")
+
+                    st.caption(
+                        f"⚠️ Les modifications s'appliquent à l'intégralité du créneau "
+                        f"{slot['heure_debut']}→{slot['heure_fin']}. "
+                        f"Pour ne modifier qu'une partie, supprimez et recréez avec les horaires souhaités.")
+
+                    eb1, eb2 = st.columns(2)
+                    with eb1:
+                        if st.form_submit_button("💾 Enregistrer", type="primary",
+                                                 use_container_width=True):
+                            if HEURES.index(new_hf) <= HEURES.index(new_hd):
+                                st.error("Fin doit être après Début.")
+                            else:
+                                pidx = st.session_state.planning_df[
+                                    st.session_state.planning_df["id_slot"] == s_id].index
+                                st.session_state.planning_df.loc[pidx, "type_heure"]  = new_type
+                                st.session_state.planning_df.loc[pidx, "heure_debut"] = new_hd
+                                st.session_state.planning_df.loc[pidx, "heure_fin"]   = new_hf
+                                try:
+                                    save_parquet(st.session_state.planning_df,
+                                                 "fiches_paie/planning.parquet")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erreur R2 : {e}")
+                    with eb2:
+                        if st.form_submit_button("🗑️ Supprimer", use_container_width=True):
+                            st.session_state.planning_df = st.session_state.planning_df[
+                                st.session_state.planning_df["id_slot"] != s_id]
+                            try:
+                                save_parquet(st.session_state.planning_df,
+                                             "fiches_paie/planning.parquet")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur : {e}")
+
         else:
-            st.caption("Ce créneau est libre — ajoutez une ou plusieurs ressources ci-dessous.")
-            st.divider()
+            st.info("Ce créneau est libre.", icon="📭")
 
         # ── Ajouter une ressource ─────────────────────────────────────────────
-        tab_one, tab_many = st.tabs(["➕ Ajouter une ressource", "👥 Ajouter plusieurs ressources"])
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
+            f'color:#8890a8;margin:12px 0 8px">➕ Ajouter une ressource</div>',
+            unsafe_allow_html=True)
 
-        with tab_one:
-            if cur_rdf.empty:
-                st.warning("Aucune ressource disponible. Créez d'abord des ressources.")
-            else:
-                res_list = cur_rdf[cur_rdf["statut_contrat"] == "Actif"]["nom_ressource"].tolist() \
-                           or cur_rdf["nom_ressource"].tolist()
-                with st.form("dlg_form_one"):
-                    fa1, fa2 = st.columns(2)
-                    with fa1:
-                        dlg_res  = st.selectbox("Ressource *", res_list)
-                        dlg_type = st.selectbox("Type d'heure *", TYPES_HEURE)
-                    with fa2:
-                        hd_def = HEURES.index("08:00") if "08:00" in HEURES else 1
-                        hf_def = HEURES[1:].index("17:00") if "17:00" in HEURES[1:] else 9
-                        dlg_hd = st.selectbox("Heure début", HEURES[:-1], index=hd_def)
-                        dlg_hf = st.selectbox("Heure fin",   HEURES[1:],  index=hf_def)
-                    dlg_notes = st.text_input("Notes (optionnel)")
-                    if st.form_submit_button("✅ Ajouter au planning", type="primary",
-                                             use_container_width=True):
-                        if HEURES.index(dlg_hf) <= HEURES.index(dlg_hd):
-                            st.error("L'heure de fin doit être postérieure à l'heure de début.")
-                        else:
-                            rrow = cur_rdf[cur_rdf["nom_ressource"] == dlg_res].iloc[0]
-                            new_slot = {
-                                "id_slot":       next_id_safe(cur_pdf, "id_slot"),
+        if cur_rdf.empty:
+            st.warning("Aucune ressource disponible.")
+        else:
+            res_list = cur_rdf[cur_rdf["statut_contrat"] == "Actif"]["nom_ressource"].tolist() \
+                       or cur_rdf["nom_ressource"].tolist()
+
+            with st.form("dlg_add"):
+                ac1, ac2 = st.columns(2)
+                with ac1:
+                    dlg_res  = st.selectbox("Ressource *", res_list)
+                    dlg_type = st.selectbox("Type d'heure *", TYPES_HEURE)
+                with ac2:
+                    hd_def = HEURES.index("08:00") if "08:00" in HEURES else 1
+                    hf_def = HEURES[1:].index("17:00") if "17:00" in HEURES[1:] else 9
+                    dlg_hd = st.selectbox("Heure début", HEURES[:-1], index=hd_def)
+                    dlg_hf = st.selectbox("Heure fin",   HEURES[1:],  index=hf_def)
+
+                # Ajout multiple en une ligne
+                multi_mode = st.checkbox("Ajouter plusieurs ressources à la fois")
+                multi_sel  = st.multiselect(
+                    "Ressources supplémentaires", res_list,
+                    help="En plus de la ressource principale") if multi_mode else []
+
+                dlg_notes = st.text_input("Notes (optionnel)")
+
+                if st.form_submit_button("✅ Ajouter", type="primary",
+                                         use_container_width=True):
+                    if HEURES.index(dlg_hf) <= HEURES.index(dlg_hd):
+                        st.error("L'heure de fin doit être postérieure à l'heure de début.")
+                    else:
+                        targets = [dlg_res] + [r for r in multi_sel if r != dlg_res]
+                        new_rows = []
+                        sid = next_id_safe(cur_pdf, "id_slot")
+                        for rname in targets:
+                            rrow = cur_rdf[cur_rdf["nom_ressource"] == rname].iloc[0]
+                            new_rows.append({
+                                "id_slot":       sid,
                                 "date":          pd.Timestamp(d),
                                 "heure_debut":   dlg_hd,
                                 "heure_fin":     dlg_hf,
                                 "id_ressource":  rrow["id_ressource"],
-                                "nom_ressource": dlg_res,
+                                "nom_ressource": rname,
                                 "type_heure":    dlg_type,
                                 "notes":         dlg_notes,
                                 "date_creation": pd.Timestamp(datetime.now()),
-                            }
-                            st.session_state.planning_df = pd.concat(
-                                [cur_pdf, pd.DataFrame([new_slot])], ignore_index=True)
-                            try:
-                                save_parquet(st.session_state.planning_df,
-                                             "fiches_paie/planning.parquet")
-                                st.success(f"✅ {dlg_res} · {d.strftime('%d/%m')} · {dlg_hd}→{dlg_hf}")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erreur R2 : {e}")
-
-        with tab_many:
-            if cur_rdf.empty:
-                st.warning("Aucune ressource disponible.")
-            else:
-                multi_list = cur_rdf[cur_rdf["statut_contrat"] == "Actif"]["nom_ressource"].tolist() \
-                             or cur_rdf["nom_ressource"].tolist()
-                with st.form("dlg_form_many"):
-                    multi_sel = st.multiselect("Ressources *", multi_list)
-                    fm1, fm2, fm3 = st.columns(3)
-                    with fm1:
-                        multi_type = st.selectbox("Type d'heure", TYPES_HEURE, key="m_type")
-                    with fm2:
-                        hd_def2 = HEURES.index("08:00") if "08:00" in HEURES else 1
-                        multi_hd = st.selectbox("Heure début", HEURES[:-1], index=hd_def2, key="m_hd")
-                    with fm3:
-                        hf_def2 = HEURES[1:].index("17:00") if "17:00" in HEURES[1:] else 9
-                        multi_hf = st.selectbox("Heure fin", HEURES[1:], index=hf_def2, key="m_hf")
-                    multi_notes = st.text_input("Notes communes", key="m_notes")
-                    if st.form_submit_button("✅ Ajouter toutes", type="primary",
-                                             use_container_width=True):
-                        if not multi_sel:
-                            st.error("Sélectionnez au moins une ressource.")
-                        elif HEURES.index(multi_hf) <= HEURES.index(multi_hd):
-                            st.error("L'heure de fin doit être postérieure à l'heure de début.")
-                        else:
-                            new_rows = []
-                            sid = next_id_safe(cur_pdf, "id_slot")
-                            for rname in multi_sel:
-                                rrow2 = cur_rdf[cur_rdf["nom_ressource"] == rname].iloc[0]
-                                new_rows.append({
-                                    "id_slot":       sid,
-                                    "date":          pd.Timestamp(d),
-                                    "heure_debut":   multi_hd,
-                                    "heure_fin":     multi_hf,
-                                    "id_ressource":  rrow2["id_ressource"],
-                                    "nom_ressource": rname,
-                                    "type_heure":    multi_type,
-                                    "notes":         multi_notes,
-                                    "date_creation": pd.Timestamp(datetime.now()),
-                                })
-                                sid += 1
-                            st.session_state.planning_df = pd.concat(
-                                [cur_pdf, pd.DataFrame(new_rows)], ignore_index=True)
-                            try:
-                                save_parquet(st.session_state.planning_df,
-                                             "fiches_paie/planning.parquet")
-                                st.success(f"✅ {len(new_rows)} ressource(s) ajoutée(s).")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erreur R2 : {e}")
+                            })
+                            sid += 1
+                        st.session_state.planning_df = pd.concat(
+                            [cur_pdf, pd.DataFrame(new_rows)], ignore_index=True)
+                        try:
+                            save_parquet(st.session_state.planning_df,
+                                         "fiches_paie/planning.parquet")
+                            st.success(f"✅ {len(new_rows)} ressource(s) ajoutée(s).")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur R2 : {e}")
 
     # ── Navigation mois / semaine ─────────────────────────────────────────────
     if "plan_anchor" not in st.session_state:
