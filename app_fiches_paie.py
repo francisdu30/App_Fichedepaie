@@ -115,16 +115,16 @@ FICHES_COLS     = ["id_fiche","id_ressource","nom_ressource","mois","annee",
                    "statut","date_generation"]
 PARAMS_COLS     = ["type_contrat","heures_hebdo","taux_horaire_base","jours_conge_annuels",
                    "periode_essai_jours","cotisations_salariales_pct",
-                   "cotisations_patronales_pct","notes"]
+                   "cotisations_patronales_pct","notes","extra_params"]
 
 PARAMS_DEFAULT = [
-    {"type_contrat":"CDI",       "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":90, "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":""},
-    {"type_contrat":"CDD",       "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":14, "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":""},
-    {"type_contrat":"Alternance","heures_hebdo":35,"taux_horaire_base":8.0, "jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":6.0, "cotisations_patronales_pct":20.0,"notes":"Exonérations spécifiques apprentissage"},
-    {"type_contrat":"Stage",     "heures_hebdo":35,"taux_horaire_base":4.35,"jours_conge_annuels":0, "periode_essai_jours":0,  "cotisations_salariales_pct":0.0, "cotisations_patronales_pct":0.0, "notes":"Gratification minimale légale"},
-    {"type_contrat":"Intérim",   "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":"Indemnité fin de mission +10%"},
-    {"type_contrat":"Freelance", "heures_hebdo":0, "taux_horaire_base":50.0,"jours_conge_annuels":0, "periode_essai_jours":0,  "cotisations_salariales_pct":0.0, "cotisations_patronales_pct":0.0, "notes":"Facturation à la mission"},
-    {"type_contrat":"Autre",     "heures_hebdo":35,"taux_horaire_base":12.0,"jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":""},
+    {"type_contrat":"CDI",       "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":90, "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":"","extra_params":"{}"},
+    {"type_contrat":"CDD",       "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":14, "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":"","extra_params":"{}"},
+    {"type_contrat":"Alternance","heures_hebdo":35,"taux_horaire_base":8.0, "jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":6.0, "cotisations_patronales_pct":20.0,"notes":"Exonérations spécifiques apprentissage","extra_params":"{}"},
+    {"type_contrat":"Stage",     "heures_hebdo":35,"taux_horaire_base":4.35,"jours_conge_annuels":0, "periode_essai_jours":0,  "cotisations_salariales_pct":0.0, "cotisations_patronales_pct":0.0, "notes":"Gratification minimale légale","extra_params":"{}"},
+    {"type_contrat":"Intérim",   "heures_hebdo":35,"taux_horaire_base":15.0,"jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":"Indemnité fin de mission +10%","extra_params":"{}"},
+    {"type_contrat":"Freelance", "heures_hebdo":0, "taux_horaire_base":50.0,"jours_conge_annuels":0, "periode_essai_jours":0,  "cotisations_salariales_pct":0.0, "cotisations_patronales_pct":0.0, "notes":"Facturation à la mission","extra_params":"{}"},
+    {"type_contrat":"Autre",     "heures_hebdo":35,"taux_horaire_base":12.0,"jours_conge_annuels":25,"periode_essai_jours":0,  "cotisations_salariales_pct":22.0,"cotisations_patronales_pct":42.0,"notes":"","extra_params":"{}"},
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -168,6 +168,14 @@ def load_data():
         st.session_state.params_df = pd.DataFrame(PARAMS_DEFAULT)
         try: save_parquet(st.session_state.params_df, "fiches_paie/params.parquet")
         except: pass
+    # Migration : ajouter extra_params si absent
+    if "extra_params" not in st.session_state.params_df.columns:
+        st.session_state.params_df["extra_params"] = "{}"
+        try: save_parquet(st.session_state.params_df, "fiches_paie/params.parquet")
+        except: pass
+    else:
+        st.session_state.params_df["extra_params"] = (
+            st.session_state.params_df["extra_params"].fillna("{}").astype(str))
     for df, key in [
         (st.session_state.ressources_df, "fiches_paie/ressources.parquet"),
         (st.session_state.planning_df,   "fiches_paie/planning.parquet"),
@@ -613,30 +621,41 @@ elif page_active == "📅 Planning":
                     label_visibility="collapsed")
 
                 if new_type != cur_type:
-                    pidx = st.session_state.planning_df[
-                        st.session_state.planning_df["id_slot"] == s_id].index
-                    # Auto-split si on est en milieu de créneau (pas à la frontière)
-                    if slot_h > hd_h and hf_h > slot_h + 1:
-                        # Tronquer le slot existant jusqu'à t_slot
-                        st.session_state.planning_df.loc[pidx, "heure_fin"] = t_slot
-                        # Créer un nouveau slot de t_slot à hf avec le nouveau type
-                        new_s = {
-                            "id_slot":       next_id_safe(st.session_state.planning_df, "id_slot"),
-                            "date":          pd.Timestamp(d),
-                            "heure_debut":   t_slot,
-                            "heure_fin":     slot["heure_fin"],
-                            "id_ressource":  slot["id_ressource"],
-                            "nom_ressource": slot["nom_ressource"],
-                            "type_heure":    new_type,
-                            "notes":         slot.get("notes", ""),
-                            "date_creation": pd.Timestamp(datetime.now()),
-                        }
-                        st.session_state.planning_df = pd.concat(
-                            [st.session_state.planning_df, pd.DataFrame([new_s])],
-                            ignore_index=True)
-                    else:
-                        # Frontière ou créneau d'1h : changer tout le slot
-                        st.session_state.planning_df.loc[pidx, "type_heure"] = new_type
+                    h_next_str = f"{slot_h+1:02d}:00"
+                    base = {
+                        "date":          pd.Timestamp(d),
+                        "id_ressource":  slot["id_ressource"],
+                        "nom_ressource": slot["nom_ressource"],
+                        "notes":         slot.get("notes", ""),
+                        "date_creation": pd.Timestamp(datetime.now()),
+                    }
+                    # Supprimer le slot original
+                    st.session_state.planning_df = st.session_state.planning_df[
+                        st.session_state.planning_df["id_slot"] != s_id]
+                    sid = next_id_safe(st.session_state.planning_df, "id_slot")
+                    new_rows = []
+                    # Partie avant la cellule (type original)
+                    if hd_h < slot_h:
+                        new_rows.append({**base, "id_slot": sid,
+                                         "heure_debut": slot["heure_debut"],
+                                         "heure_fin":   t_slot,
+                                         "type_heure":  cur_type})
+                        sid += 1
+                    # La cellule cliquée (nouveau type)
+                    new_rows.append({**base, "id_slot": sid,
+                                     "heure_debut": t_slot,
+                                     "heure_fin":   h_next_str,
+                                     "type_heure":  new_type})
+                    sid += 1
+                    # Partie après la cellule (type original)
+                    if hf_h > slot_h + 1:
+                        new_rows.append({**base, "id_slot": sid,
+                                         "heure_debut": h_next_str,
+                                         "heure_fin":   slot["heure_fin"],
+                                         "type_heure":  cur_type})
+                    st.session_state.planning_df = pd.concat(
+                        [st.session_state.planning_df, pd.DataFrame(new_rows)],
+                        ignore_index=True)
                     try:
                         save_parquet(st.session_state.planning_df, "fiches_paie/planning.parquet")
                         st.rerun()
@@ -1067,6 +1086,21 @@ elif page_active == "💰 Fiches de Paie":
                 st.markdown(f'<div class="fiche-total"><span>NET À PAYER</span>'
                             f'<span style="color:#177049;font-size:20px">{net:.2f} €</span></div>',
                             unsafe_allow_html=True)
+
+                # Champs personnalisés du type de contrat
+                import json as _json2
+                _extra_raw = p.get("extra_params", "{}")
+                _extra_fields = {}
+                try: _extra_fields = _json2.loads(_extra_raw) if _extra_raw else {}
+                except Exception: pass
+                if _extra_fields:
+                    st.markdown('<hr class="fiche-sep">', unsafe_allow_html=True)
+                    st.markdown('<div style="font-size:11px;font-weight:600;text-transform:uppercase;'
+                                'color:#8890a8;margin-bottom:6px">Informations complémentaires</div>',
+                                unsafe_allow_html=True)
+                    for fname, fval in _extra_fields.items():
+                        frow(fname, str(fval))
+
                 st.markdown('</div>', unsafe_allow_html=True)
 
     # ── Historique ─────────────────────────────────────────────────────────────
@@ -1134,9 +1168,11 @@ elif page_active == "💰 Fiches de Paie":
 # PAGE : PARAMÈTRES
 # ══════════════════════════════════════════════════════════════════════════════
 elif page_active == "⚙️ Paramètres":
+    import json as _json
+
     st.markdown("# ⚙️ Paramètres")
     st.caption("Modifiez les paramètres par défaut de chaque type de contrat. "
-               "Ces valeurs pré-remplissent automatiquement les formulaires de création.")
+               "Renommez, ajoutez des champs personnalisés, ou créez de nouveaux types.")
 
     defined_types = set(TYPES_CONTRAT)
     all_params    = pms if not pms.empty else pd.DataFrame(PARAMS_DEFAULT)
@@ -1148,8 +1184,14 @@ elif page_active == "⚙️ Paramètres":
         except Exception as e:
             return False, str(e)
 
+    def _parse_extra(raw):
+        try:
+            return _json.loads(raw) if raw and raw.strip() not in ("", "{}") else {}
+        except Exception:
+            return {}
+
     def _compact_param_fields(key_prefix, cur):
-        """Champs de paramètres en grille 3×2. Retourne le dict des valeurs."""
+        """Champs standard en grille 3×2."""
         c1, c2, c3 = st.columns(3)
         with c1:
             ph  = st.number_input("Heures/sem", 0.0, 60.0,
@@ -1178,21 +1220,24 @@ elif page_active == "⚙️ Paramètres":
                 "periode_essai_jours": pe, "cotisations_salariales_pct": pcs,
                 "cotisations_patronales_pct": pcp, "notes": pn}
 
-    # ── Cartes pour chaque type ───────────────────────────────────────────────
+    # ── Cartes par type ───────────────────────────────────────────────────────
     all_tc_list = all_params["type_contrat"].tolist()
 
     for tc in all_tc_list:
-        is_custom   = tc not in defined_types
-        badge_col   = "#6b1aa8" if is_custom else "#1a6fa8"
-        badge_bg    = "#ede8fd" if is_custom else "#ddeeff"
-        badge_txt   = "Personnalisé" if is_custom else "Prédéfini"
-        cur         = all_params[all_params["type_contrat"] == tc].iloc[0].to_dict()
+        is_custom = tc not in defined_types
+        badge_col = "#6b1aa8" if is_custom else "#1a6fa8"
+        badge_bg  = "#ede8fd" if is_custom else "#ddeeff"
+        badge_txt = "Personnalisé" if is_custom else "Prédéfini"
+        cur       = all_params[all_params["type_contrat"] == tc].iloc[0].to_dict()
+        extra     = _parse_extra(cur.get("extra_params", "{}"))
 
-        # Résumé court pour le label de l'expander
         hh   = cur.get("heures_hebdo", 0)
         taux = cur.get("taux_horaire_base", 0)
         cs   = cur.get("cotisations_salariales_pct", 0)
+        n_extra = len(extra)
         summary = f"{hh:.0f}h/sem · {taux:.2f}€/h · Sal. {cs:.0f}%"
+        if n_extra:
+            summary += f" · +{n_extra} champ(s)"
 
         with st.expander(
             f"{'🏷️' if is_custom else '📋'}  **{tc}** — {summary}",
@@ -1203,15 +1248,28 @@ elif page_active == "⚙️ Paramètres":
                 f'border-radius:8px;font-size:11px;font-weight:600">{badge_txt}</span>',
                 unsafe_allow_html=True)
 
+            # ── Formulaire principal (standard + renommage) ────────────────
             with st.form(f"param_edit_{tc}"):
+                # Renommage
+                new_name = st.text_input(
+                    "Nom du type de contrat",
+                    value=tc,
+                    key=f"rename_{tc}",
+                    help="Modifier ce champ renomme le type partout (ressources incluses).")
+
+                st.markdown(
+                    '<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
+                    'color:#8890a8;letter-spacing:.05em;margin:10px 0 4px">'
+                    'Paramètres standard</div>',
+                    unsafe_allow_html=True)
                 vals = _compact_param_fields(f"e_{tc}", cur)
+
                 btn_cols = st.columns([2, 1, 1])
                 with btn_cols[0]:
                     save_ok = st.form_submit_button(
                         "💾 Enregistrer", type="primary", use_container_width=True)
                 with btn_cols[1]:
-                    # Réinitialiser aux valeurs d'usine (prédéfinis seulement)
-                    factory = next((p for p in PARAMS_DEFAULT if p["type_contrat"] == tc), None)
+                    factory  = next((p for p in PARAMS_DEFAULT if p["type_contrat"] == tc), None)
                     reset_ok = st.form_submit_button(
                         "🔄 Défaut", use_container_width=True,
                         disabled=(factory is None))
@@ -1222,26 +1280,47 @@ elif page_active == "⚙️ Paramètres":
                         help="Seuls les types personnalisés peuvent être supprimés.")
 
                 if save_ok:
-                    new_p = {"type_contrat": tc, **vals}
-                    idx = st.session_state.params_df[
-                        st.session_state.params_df["type_contrat"] == tc].index
-                    if len(idx) > 0:
-                        for k, v in new_p.items():
-                            st.session_state.params_df.loc[idx, k] = v
+                    n = new_name.strip()
+                    if not n:
+                        st.error("Le nom ne peut pas être vide.")
+                    elif n != tc and n in all_params["type_contrat"].values:
+                        st.error(f"«{n}» existe déjà.")
                     else:
-                        st.session_state.params_df = pd.concat(
-                            [st.session_state.params_df, pd.DataFrame([new_p])], ignore_index=True)
-                    ok, err = _save_params(st.session_state.params_df)
-                    if ok:
-                        st.success(f"✅ «{tc}» enregistré."); st.rerun()
-                    else:
-                        st.error(f"Erreur : {err}")
+                        new_p = {"type_contrat": n, **vals,
+                                 "extra_params": cur.get("extra_params", "{}")}
+                        pidx = st.session_state.params_df[
+                            st.session_state.params_df["type_contrat"] == tc].index
+                        if len(pidx) > 0:
+                            for k, v in new_p.items():
+                                st.session_state.params_df.loc[pidx, k] = v
+                        else:
+                            st.session_state.params_df = pd.concat(
+                                [st.session_state.params_df, pd.DataFrame([new_p])],
+                                ignore_index=True)
+                        # Propager renommage dans ressources
+                        if n != tc and not st.session_state.ressources_df.empty:
+                            ridx = st.session_state.ressources_df[
+                                st.session_state.ressources_df["type_contrat"] == tc].index
+                            st.session_state.ressources_df.loc[ridx, "type_contrat"] = n
+                            try:
+                                save_parquet(st.session_state.ressources_df,
+                                             "fiches_paie/ressources.parquet")
+                            except Exception:
+                                pass
+                        ok, err = _save_params(st.session_state.params_df)
+                        if ok:
+                            st.success(f"✅ «{n}» enregistré."); st.rerun()
+                        else:
+                            st.error(f"Erreur : {err}")
 
                 if reset_ok and factory:
-                    idx = st.session_state.params_df[
+                    pidx = st.session_state.params_df[
                         st.session_state.params_df["type_contrat"] == tc].index
                     for k, v in factory.items():
-                        st.session_state.params_df.loc[idx, k] = v
+                        st.session_state.params_df.loc[pidx, k] = v
+                    # Garder extra_params lors du reset
+                    st.session_state.params_df.loc[pidx, "extra_params"] = \
+                        cur.get("extra_params", "{}")
                     ok, err = _save_params(st.session_state.params_df)
                     if ok:
                         st.success(f"✅ «{tc}» réinitialisé."); st.rerun()
@@ -1257,7 +1336,74 @@ elif page_active == "⚙️ Paramètres":
                     else:
                         st.error(f"Erreur : {err}")
 
-    # ── Ajouter un nouveau type ───────────────────────────────────────────────
+            # ── Champs personnalisés (hors form pour permettre l'ajout dynamique) ──
+            st.markdown(
+                '<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
+                'color:#8890a8;letter-spacing:.05em;margin:12px 0 6px">'
+                '🔧 Champs personnalisés</div>',
+                unsafe_allow_html=True)
+            st.caption("Ces champs apparaissent dans les fiches de paie (primes, avantages, etc.)")
+
+            # Afficher / éditer les champs existants
+            extra_updated = dict(extra)  # copie de travail
+            changed = False
+
+            if extra:
+                for field_name, field_val in list(extra.items()):
+                    fc1, fc2, fc3 = st.columns([2, 2, 0.5])
+                    with fc1:
+                        new_key = st.text_input(
+                            "Nom", value=field_name,
+                            key=f"ek_{tc}_{field_name}",
+                            label_visibility="collapsed")
+                    with fc2:
+                        new_val = st.text_input(
+                            "Valeur", value=str(field_val),
+                            key=f"ev_{tc}_{field_name}",
+                            label_visibility="collapsed")
+                    with fc3:
+                        if st.button("✕", key=f"ed_{tc}_{field_name}"):
+                            extra_updated.pop(field_name, None)
+                            changed = True
+                    # Mise à jour si clé ou valeur changée
+                    if not changed and (new_key != field_name or new_val != str(field_val)):
+                        extra_updated.pop(field_name, None)
+                        if new_key.strip():
+                            extra_updated[new_key.strip()] = new_val
+                        changed = True
+            else:
+                st.caption("Aucun champ personnalisé pour ce type.")
+
+            # Nouveau champ
+            nf1, nf2, nf3 = st.columns([2, 2, 0.8])
+            with nf1:
+                new_field_name = st.text_input(
+                    "Nouveau champ", placeholder="Ex: Prime transport",
+                    key=f"nfk_{tc}", label_visibility="collapsed")
+            with nf2:
+                new_field_val = st.text_input(
+                    "Valeur", placeholder="Ex: 50€/mois",
+                    key=f"nfv_{tc}", label_visibility="collapsed")
+            with nf3:
+                if st.button("➕ Ajouter", key=f"nfa_{tc}", use_container_width=True):
+                    if new_field_name.strip():
+                        extra_updated[new_field_name.strip()] = new_field_val
+                        changed = True
+
+            # Sauvegarder si modifié
+            if changed:
+                pidx = st.session_state.params_df[
+                    st.session_state.params_df["type_contrat"] == tc].index
+                new_extra = _json.dumps(extra_updated, ensure_ascii=False)
+                if len(pidx) > 0:
+                    st.session_state.params_df.loc[pidx, "extra_params"] = new_extra
+                ok, err = _save_params(st.session_state.params_df)
+                if ok:
+                    st.rerun()
+                else:
+                    st.error(f"Erreur : {err}")
+
+    # ── Nouveau type ──────────────────────────────────────────────────────────
     st.markdown("---")
     with st.expander("➕ Créer un nouveau type de contrat", expanded=False):
         st.caption("Le nouveau type apparaîtra dans les menus déroulants de l'onglet Ressources.")
@@ -1276,7 +1422,7 @@ elif page_active == "⚙️ Paramètres":
                 elif n in all_params["type_contrat"].values:
                     st.error(f"«{n}» existe déjà.")
                 else:
-                    new_p = {"type_contrat": n, **new_vals}
+                    new_p = {"type_contrat": n, **new_vals, "extra_params": "{}"}
                     st.session_state.params_df = pd.concat(
                         [st.session_state.params_df, pd.DataFrame([new_p])], ignore_index=True)
                     ok, err = _save_params(st.session_state.params_df)
